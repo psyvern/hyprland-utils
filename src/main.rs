@@ -18,7 +18,7 @@ enum Command {
     Screenshot { mode: ScreenshotMode },
 }
 
-#[derive(Debug, Clone, Subcommand, ValueEnum)]
+#[derive(PartialEq, Eq, Debug, Clone, Subcommand, ValueEnum)]
 enum ScreenshotMode {
     Point,
     Region,
@@ -35,7 +35,7 @@ impl Display for ScreenshotMode {
                 ScreenshotMode::Point => "point",
                 ScreenshotMode::Region => "region",
                 ScreenshotMode::Window => "window",
-                ScreenshotMode::Display => "display",
+                ScreenshotMode::Display => "active",
             }
         )
     }
@@ -82,13 +82,18 @@ fn screenshot(mode: ScreenshotMode) -> HResult<()> {
         .join("Pictures")
         .join("screenshots");
     let path = directory.clone().join(&file);
-    dbg!(&path);
 
     std::fs::create_dir_all(&directory).unwrap();
 
-    let output = std::process::Command::new("hyprshot")
-        .arg("-m")
-        .arg(mode.to_string())
+    let mut output = std::process::Command::new("hyprshot");
+    let output = output.arg("-m");
+    let output = match mode {
+        ScreenshotMode::Point => output.arg("point"),
+        ScreenshotMode::Region => output.arg("region"),
+        ScreenshotMode::Window => output.arg("window"),
+        ScreenshotMode::Display => output.arg("active").arg("-m").arg("output"),
+    };
+    let output = output
         .arg("-o")
         .arg(&directory)
         .arg("-f")

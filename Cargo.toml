@@ -8,5 +8,6 @@ chrono = "0.4.39"
 clap = { version = "4.5.24", features = ["derive"] }
 homedir = "0.3.4"
 hyprland = "0.4.0-beta.2"
+itertools = "0.14.0"
 notify-rust = "4.11.5"
 open = "5.3.2"

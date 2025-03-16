@@ -5,6 +5,7 @@ use clap::{Parser, Subcommand, ValueEnum};
 use hyprland::{
     data::{Client, Clients, CursorPosition, Monitor, Workspace},
     dispatch::{Dispatch, DispatchType, Position},
+    keyword::Keyword,
     shared::{HyprData, HyprDataActive, HyprDataActiveOptional},
     Result as HResult,
 };
@@ -21,7 +22,6 @@ enum Command {
 
 #[derive(PartialEq, Eq, Debug, Clone, Subcommand, ValueEnum)]
 enum ScreenshotMode {
-    Point,
     Region,
     Window,
     Display,
@@ -33,7 +33,6 @@ impl Display for ScreenshotMode {
             f,
             "{}",
             match self {
-                ScreenshotMode::Point => "point",
                 ScreenshotMode::Region => "region",
                 ScreenshotMode::Window => "window",
                 ScreenshotMode::Display => "active",
@@ -75,7 +74,41 @@ fn toggle_float() -> HResult<()> {
     Ok(())
 }
 
-fn grab_window(path: &Path) -> HResult<bool> {
+fn grab_region() -> HResult<Option<String>> {
+    let child = std::process::Command::new("slurp")
+        .arg("-c")
+        .arg("FFFFFFFF")
+        .arg("-F")
+        .arg("Fira Code")
+        .arg("-f")
+        .arg("%x,%y %wx%h")
+        .arg("-d")
+        .output()
+        .unwrap();
+
+    let output = child.stdout;
+
+    if output.is_empty() {
+        Ok(None)
+    } else {
+        Ok(Some(String::from_utf8(output).unwrap()))
+    }
+}
+
+fn grab_display() -> HResult<Option<String>> {
+    let monitor = Monitor::get_active()?;
+    let data = format!(
+        "{},{} {}x{}",
+        monitor.x,
+        monitor.y,
+        (f32::from(monitor.width) / monitor.scale).round(),
+        (f32::from(monitor.height) / monitor.scale).round()
+    );
+
+    Ok(Some(data))
+}
+
+fn grab_window() -> HResult<Option<String>> {
     let workspace = Workspace::get_active()?;
     let clients = Clients::get()?
         .into_iter()
@@ -105,24 +138,32 @@ fn grab_window(path: &Path) -> HResult<bool> {
         .stdout;
 
     if output.is_empty() {
-        Ok(false)
+        Ok(None)
     } else {
-        save_geometry(path, output).map(|_| true)
+        Ok(Some(String::from_utf8(output).unwrap()))
     }
 }
 
-fn save_geometry(path: &Path, geometry: Vec<u8>) -> HResult<()> {
+fn save_geometry(path: &Path, geometry: String) {
     std::process::Command::new("grim")
         .arg("-g")
-        .arg(String::from_utf8(geometry).unwrap())
+        .arg(geometry)
         .arg(path)
         .spawn()
         .unwrap()
         .wait()
         .unwrap();
-    // wl-copy --type image/png < "$output"
 
-    Ok(())
+    std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "wl-copy --type image/png < {}",
+            path.to_string_lossy()
+        ))
+        .spawn()
+        .unwrap()
+        .wait()
+        .unwrap();
 }
 
 fn screenshot(mode: ScreenshotMode) -> HResult<()> {
@@ -138,40 +179,29 @@ fn screenshot(mode: ScreenshotMode) -> HResult<()> {
 
     let result = match mode {
         ScreenshotMode::Window => {
-            hyprland::keyword::Keyword::set("general:col.inactive_border", 0xFFFFFFFFu32)?;
-            hyprland::keyword::Keyword::set("general:col.active_border", 0xFFFFFFFFu32)?;
-            hyprland::keyword::Keyword::set("decoration:rounding", 0)?;
-            hyprland::keyword::Keyword::set("decoration:dim_inactive", 0)?;
+            Keyword::set("general:col.inactive_border", 0xFFFFFFFFu32)?;
+            Keyword::set("general:col.active_border", 0xFFFFFFFFu32)?;
+            Keyword::set("decoration:rounding", 0)?;
+            Keyword::set("decoration:dim_inactive", 0)?;
             hyprland::dispatch!(Custom, "submap", "empty")?;
-            let result = grab_window(&path)?;
-            hyprland::ctl::reload::call()?;
-            hyprland::dispatch!(Custom, "submap", "reset")?;
 
-            result
+            grab_window()?
         }
-        _ => {
-            let mut output = std::process::Command::new("hyprshot");
-            let output = output.arg("-m");
-            let output = match mode {
-                ScreenshotMode::Point => output.arg("point"),
-                ScreenshotMode::Region => output.arg("region"),
-                ScreenshotMode::Window => unreachable!("Window already handled"),
-                ScreenshotMode::Display => output.arg("active").arg("-m").arg("output"),
-            };
-            let output = output
-                .arg("-o")
-                .arg(&directory)
-                .arg("-f")
-                .arg(&file)
-                .arg("-s")
-                .output()
-                .unwrap();
-
-            output.stderr.is_empty()
-        }
+        ScreenshotMode::Region => grab_region()?,
+        ScreenshotMode::Display => grab_display()?,
     };
+    let has_result = result.is_some();
 
-    if result {
+    if let Some(result) = result {
+        save_geometry(&path, result);
+    }
+
+    if mode == ScreenshotMode::Window {
+        hyprland::ctl::reload::call()?;
+        hyprland::dispatch!(Custom, "submap", "reset")?;
+    }
+
+    if has_result {
         use notify_rust::Notification;
         Notification::new()
             .image_path(&path.to_string_lossy())

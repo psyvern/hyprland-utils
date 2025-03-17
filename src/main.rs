@@ -3,7 +3,7 @@ use std::{fmt::Display, io::Write, path::Path, process::Stdio};
 use chrono::Local;
 use clap::{Parser, Subcommand, ValueEnum};
 use hyprland::{
-    data::{Client, Clients, CursorPosition, Monitor, Workspace},
+    data::{Client, Clients, CursorPosition, FullscreenMode, Monitor, Workspace},
     dispatch::{Dispatch, DispatchType, Position},
     keyword::Keyword,
     shared::{HyprData, HyprDataActive, HyprDataActiveOptional},
@@ -16,6 +16,8 @@ use itertools::Itertools;
 enum Command {
     /// Toggles the floating state of a window, resizing it if necessary
     ToggleFloat,
+    /// Toggles the fullscreen state of a window, keeping its client state
+    ToggleFullscreen,
     /// Takes a screenshot
     Screenshot { mode: ScreenshotMode },
 }
@@ -45,6 +47,7 @@ fn main() -> HResult<()> {
     let command = Command::parse();
     match command {
         Command::ToggleFloat => toggle_float(),
+        Command::ToggleFullscreen => toggle_fullscreen(),
         Command::Screenshot { mode } => screenshot(mode),
     }
 }
@@ -70,6 +73,28 @@ fn toggle_float() -> HResult<()> {
         hyprland::dispatch!(ResizeActive, Position::Exact(width / 2, height / 2))?;
         hyprland::dispatch!(MoveActive, Position::Exact(x - width / 4, y - height / 4))?;
     }
+
+    Ok(())
+}
+
+fn toggle_fullscreen() -> HResult<()> {
+    let active_window = match Client::get_active()? {
+        Some(active_window) => active_window,
+        None => return Ok(()),
+    };
+
+    hyprland::dispatch!(
+        Custom,
+        "fullscreenstate",
+        &format!(
+            "{} -1",
+            if active_window.fullscreen == FullscreenMode::None {
+                3
+            } else {
+                0
+            }
+        )
+    )?;
 
     Ok(())
 }

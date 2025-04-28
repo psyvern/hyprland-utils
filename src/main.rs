@@ -15,7 +15,10 @@ use itertools::Itertools;
 #[command(version, about, long_about = None)]
 enum Command {
     /// Toggles the floating state of a window, resizing it if necessary
-    ToggleFloat,
+    ToggleFloat {
+        #[arg(short = 'c')]
+        center: bool,
+    },
     /// Toggles the fullscreen state of a window, keeping its client state
     ToggleFullscreen,
     /// Takes a screenshot
@@ -46,16 +49,15 @@ impl Display for ScreenshotMode {
 fn main() -> HResult<()> {
     let command = Command::parse();
     match command {
-        Command::ToggleFloat => toggle_float(),
+        Command::ToggleFloat { center } => toggle_float(center),
         Command::ToggleFullscreen => toggle_fullscreen(),
         Command::Screenshot { mode } => screenshot(mode),
     }
 }
 
-fn toggle_float() -> HResult<()> {
-    let position = CursorPosition::get()?;
-    let x: i16 = position.x.try_into().unwrap_or_default();
-    let y: i16 = position.y.try_into().unwrap_or_default();
+fn toggle_float(center: bool) -> HResult<()> {
+    let border = 4.0;
+    let gaps = (20.0, 10.0, 20.0, 20.0);
 
     let active_window = match Client::get_active()? {
         Some(active_window) => active_window,
@@ -63,15 +65,47 @@ fn toggle_float() -> HResult<()> {
     };
 
     let monitor = Monitor::get_active()?;
-    let width: i16 = monitor.width.try_into().unwrap_or_default();
-    let height: i16 = monitor.height.try_into().unwrap_or_default();
+    let scale = monitor.scale;
+    let width = monitor.width as f32 / scale;
+    let height = monitor.height as f32 / scale;
 
     if active_window.floating {
         Dispatch::call(DispatchType::ToggleFloating(None))?;
-    } else {
+    } else if center {
         hyprland::dispatch!(ToggleFloating, None)?;
-        hyprland::dispatch!(ResizeActive, Position::Exact(width / 2, height / 2))?;
-        hyprland::dispatch!(MoveActive, Position::Exact(x - width / 4, y - height / 4))?;
+        hyprland::dispatch!(
+            ResizeActive,
+            Position::Exact((width / 2.0) as i16, (height / 2.0) as i16,)
+        )?;
+        hyprland::dispatch!(
+            MoveActive,
+            Position::Exact((width / 4.0) as i16, (height / 4.0) as i16)
+        )?;
+    } else {
+        let reserved = (
+            monitor.reserved.0 as f32,
+            monitor.reserved.1 as f32,
+            monitor.reserved.2 as f32,
+            monitor.reserved.3 as f32,
+        );
+
+        let position = CursorPosition::get()?;
+        let x = (position.x as f32)
+            .min(width - width / 4.0 - gaps.2 - reserved.2 - border)
+            .max(width / 4.0 + gaps.0 + reserved.0 + border);
+        let y = (position.y as f32)
+            .min(height - height / 4.0 - gaps.3 - reserved.3 - border)
+            .max(height / 4.0 + gaps.1 + reserved.1 + border);
+
+        hyprland::dispatch!(ToggleFloating, None)?;
+        hyprland::dispatch!(
+            ResizeActive,
+            Position::Exact((width / 2.0) as i16, (height / 2.0) as i16)
+        )?;
+        hyprland::dispatch!(
+            MoveActive,
+            Position::Exact((x - width / 4.0) as i16, (y - height / 4.0) as i16)
+        )?;
     }
 
     Ok(())

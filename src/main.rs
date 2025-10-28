@@ -23,6 +23,8 @@ enum Command {
     ToggleFullscreen,
     /// Takes a screenshot
     Screenshot { mode: ScreenshotMode },
+    /// Creates a new terminal window in the same directory
+    NewTerminal,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Subcommand, ValueEnum)]
@@ -52,6 +54,7 @@ fn main() -> HResult<()> {
         Command::ToggleFloat { center } => toggle_float(center),
         Command::ToggleFullscreen => toggle_fullscreen(),
         Command::Screenshot { mode } => screenshot(mode),
+        Command::NewTerminal => new_terminal(),
     }
 }
 
@@ -283,6 +286,39 @@ fn screenshot(mode: ScreenshotMode) -> HResult<()> {
                 "edit" => open::that_detached(path).unwrap(),
                 _ => (),
             });
+    }
+
+    Ok(())
+}
+
+fn new_terminal() -> HResult<()> {
+    let client = Client::get_active()?;
+
+    let Some(client) = client else {
+        return Ok(());
+    };
+
+    if client.initial_class == "com.mitchellh.ghostty" {
+        let mut title = client.title.rsplit(' ');
+
+        let mut string = String::from(title.next().unwrap_or(""));
+        while !(string.starts_with('/') || string.starts_with('~')) {
+            if let Some(part) = title.next() {
+                string = format!("{part} {string}");
+            } else {
+                return Ok(());
+            }
+        }
+
+        let Ok(path) = expanduser::expanduser(string) else {
+            return Ok(());
+        };
+
+        let error = exec::Command::new("ghostty")
+            .arg(format!("--working-directory={}", path.to_string_lossy()))
+            .exec();
+
+        println!("{error:?}");
     }
 
     Ok(())

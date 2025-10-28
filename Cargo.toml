@@ -6,6 +6,8 @@ edition = "2021"
 [dependencies]
 chrono = "0.4.39"
 clap = { version = "4.5.24", features = ["derive"] }
+exec = "0.3.1"
+expanduser = "1.2.2"
 homedir = "0.3.4"
 hyprland = "0.4.0-beta.2"
 itertools = "0.14.0"

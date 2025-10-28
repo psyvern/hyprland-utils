@@ -315,6 +315,7 @@ fn new_terminal() -> HResult<()> {
         };
 
         let error = exec::Command::new("ghostty")
+            .arg("--gtk-single-instance=true")
             .arg(format!("--working-directory={}", path.to_string_lossy()))
             .exec();
 

@@ -1,4 +1,4 @@
-use std::{fmt::Display, io::Write, path::Path, process::Stdio};
+use std::{fmt::Display, io::Write, path::Path, process::Stdio, str::FromStr};
 
 use chrono::Local;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -136,7 +136,56 @@ fn toggle_fullscreen() -> HResult<()> {
     Ok(())
 }
 
-fn grab_region() -> HResult<Option<String>> {
+struct Geometry {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Debug)]
+enum ParseGeometryError {
+    WrongArgumentsCount,
+    ParseArgument(usize),
+}
+
+impl FromStr for Geometry {
+    type Err = ParseGeometryError;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let Some([x, y, w, h]) = s.split_whitespace().collect_array() else {
+            return Err(ParseGeometryError::WrongArgumentsCount);
+        };
+
+        let x = x
+            .parse()
+            .map_err(|_| ParseGeometryError::ParseArgument(0))?;
+        let y = y
+            .parse()
+            .map_err(|_| ParseGeometryError::ParseArgument(1))?;
+        let w = w
+            .parse()
+            .map_err(|_| ParseGeometryError::ParseArgument(2))?;
+        let h = h
+            .parse()
+            .map_err(|_| ParseGeometryError::ParseArgument(3))?;
+
+        Ok(Self {
+            x,
+            y,
+            width: w,
+            height: h,
+        })
+    }
+}
+
+impl Display for Geometry {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{},{} {}x{}", self.x, self.y, self.width, self.height)
+    }
+}
+
+fn grab_region() -> HResult<Option<Geometry>> {
     let child = std::process::Command::new("slurp")
         .arg("-c")
         .arg("A2C9FEFF")
@@ -145,7 +194,7 @@ fn grab_region() -> HResult<Option<String>> {
         .arg("-F")
         .arg("monospace")
         .arg("-f")
-        .arg("%x,%y %wx%h")
+        .arg("%x %y %w %h")
         .arg("-d")
         .output()
         .unwrap();
@@ -155,24 +204,37 @@ fn grab_region() -> HResult<Option<String>> {
     if output.is_empty() {
         Ok(None)
     } else {
-        Ok(Some(String::from_utf8(output).unwrap()))
+        let output = String::from_utf8(output).unwrap();
+        let region = output.parse::<Geometry>().unwrap();
+
+        if region.width > 2 && region.height > 2 {
+            // Remove one pixel from every side
+            let region = Geometry {
+                x: region.x + 1,
+                y: region.y + 1,
+                width: region.width - 2,
+                height: region.height - 2,
+            };
+            Ok(Some(region))
+        } else {
+            Ok(None)
+        }
     }
 }
 
-fn grab_display() -> HResult<Option<String>> {
+fn grab_display() -> HResult<Option<Geometry>> {
     let monitor = Monitor::get_active()?;
-    let data = format!(
-        "{},{} {}x{}",
-        monitor.x,
-        monitor.y,
-        (f32::from(monitor.width) / monitor.scale).round(),
-        (f32::from(monitor.height) / monitor.scale).round()
-    );
+    let data = Geometry {
+        x: monitor.x,
+        y: monitor.y,
+        width: (f32::from(monitor.width) / monitor.scale).round() as u32,
+        height: (f32::from(monitor.height) / monitor.scale).round() as u32,
+    };
 
     Ok(Some(data))
 }
 
-fn grab_window() -> HResult<Option<String>> {
+fn grab_window() -> HResult<Option<Geometry>> {
     let workspace = Workspace::get_active()?;
     let clients = Clients::get()?
         .into_iter()
@@ -187,7 +249,7 @@ fn grab_window() -> HResult<Option<String>> {
         .arg("-B")
         .arg("00000080")
         .arg("-f")
-        .arg("%x,%y %wx%h")
+        .arg("%x %y %w %h")
         .arg("-r")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -208,14 +270,15 @@ fn grab_window() -> HResult<Option<String>> {
     if output.is_empty() {
         Ok(None)
     } else {
-        Ok(Some(String::from_utf8(output).unwrap()))
+        let output = String::from_utf8(output).unwrap();
+        Ok(Some(output.parse().unwrap()))
     }
 }
 
-fn save_geometry(path: &Path, geometry: String) {
+fn save_geometry(path: &Path, geometry: Geometry) {
     std::process::Command::new("grim")
         .arg("-g")
-        .arg(geometry)
+        .arg(geometry.to_string())
         .arg(path)
         .spawn()
         .unwrap()
@@ -251,6 +314,7 @@ fn screenshot(mode: ScreenshotMode) -> HResult<()> {
             Keyword::set("general:col.active_border", 0xFFFFFFFFu32)?;
             Keyword::set("decoration:rounding", 0)?;
             Keyword::set("decoration:dim_inactive", 0)?;
+            Keyword::set("decoration:inactive_opacity", 1)?;
             hyprland::dispatch!(Custom, "submap", "empty")?;
 
             grab_window()?

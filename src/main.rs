@@ -4,8 +4,7 @@ use chrono::Local;
 use clap::{Parser, Subcommand, ValueEnum};
 use hyprland::{
     data::{Client, Clients, CursorPosition, FullscreenMode, Monitor, Workspace},
-    dispatch::{Dispatch, DispatchType, Position},
-    keyword::Keyword,
+    dispatch::{Dispatch, DispatchType},
     shared::{HyprData, HyprDataActive, HyprDataActiveOptional},
     Result as HResult,
 };
@@ -58,6 +57,10 @@ fn main() -> HResult<()> {
     }
 }
 
+fn dispatch<S: AsRef<str>>(arg: S) -> HResult<()> {
+    Dispatch::call(DispatchType::Custom(arg.as_ref(), ""))
+}
+
 fn toggle_float(center: bool) -> HResult<()> {
     let border = 4.0;
     let gaps = (20.0, 10.0, 20.0, 20.0);
@@ -73,17 +76,19 @@ fn toggle_float(center: bool) -> HResult<()> {
     let height = monitor.height as f32 / scale;
 
     if active_window.floating {
-        Dispatch::call(DispatchType::ToggleFloating(None))?;
+        dispatch("hl.dsp.window.float()")?;
     } else if center {
-        hyprland::dispatch!(ToggleFloating, None)?;
-        hyprland::dispatch!(
-            ResizeActive,
-            Position::Exact((width / 2.0) as i16, (height / 2.0) as i16,)
-        )?;
-        hyprland::dispatch!(
-            MoveActive,
-            Position::Exact((width / 4.0) as i16, (height / 4.0) as i16)
-        )?;
+        dispatch("hl.dsp.window.float()")?;
+        dispatch(format!(
+            "hl.dsp.window.resize({{ x = {}, y = {} }})",
+            width / 2.0,
+            height / 2.0
+        ))?;
+        dispatch(format!(
+            "hl.dsp.window.move({{ x = {}, y = {} }})",
+            width / 4.0,
+            height / 4.0
+        ))?;
     } else {
         let reserved = (
             monitor.reserved.0 as f32,
@@ -100,15 +105,17 @@ fn toggle_float(center: bool) -> HResult<()> {
             .min(height - height / 4.0 - gaps.3 - reserved.3 - border)
             .max(height / 4.0 + gaps.1 + reserved.1 + border);
 
-        hyprland::dispatch!(ToggleFloating, None)?;
-        hyprland::dispatch!(
-            ResizeActive,
-            Position::Exact((width / 2.0) as i16, (height / 2.0) as i16)
-        )?;
-        hyprland::dispatch!(
-            MoveActive,
-            Position::Exact((x - width / 4.0) as i16, (y - height / 4.0) as i16)
-        )?;
+        dispatch("hl.dsp.window.float()")?;
+        dispatch(format!(
+            "hl.dsp.window.resize({{ x = {}, y = {} }})",
+            width / 2.0,
+            height / 2.0
+        ))?;
+        dispatch(format!(
+            "hl.dsp.window.move({{ x = {}, y = {} }})",
+            x - width / 4.0,
+            y - height / 4.0
+        ))?;
     }
 
     Ok(())
@@ -120,18 +127,14 @@ fn toggle_fullscreen() -> HResult<()> {
         None => return Ok(()),
     };
 
-    hyprland::dispatch!(
-        Custom,
-        "fullscreenstate",
-        &format!(
-            "{} -1",
-            if active_window.fullscreen == FullscreenMode::None {
-                3
-            } else {
-                0
-            }
-        )
-    )?;
+    dispatch(format!(
+        "hl.dsp.window.fullscreen_state({{ internal = {}, client = -1 }})",
+        if active_window.fullscreen == FullscreenMode::None {
+            3
+        } else {
+            0
+        }
+    ))?;
 
     Ok(())
 }
@@ -310,12 +313,28 @@ fn screenshot(mode: ScreenshotMode) -> HResult<()> {
 
     let result = match mode {
         ScreenshotMode::Window => {
-            Keyword::set("general:col.inactive_border", 0xFFFFFFFFu32)?;
-            Keyword::set("general:col.active_border", 0xFFFFFFFFu32)?;
-            Keyword::set("decoration:rounding", 0)?;
-            Keyword::set("decoration:dim_inactive", 0)?;
-            Keyword::set("decoration:inactive_opacity", 1)?;
-            hyprland::dispatch!(Custom, "submap", "empty")?;
+            std::process::Command::new("hyprctl")
+                .arg("-r")
+                .arg("eval")
+                .arg(
+                    r#"hl.config({
+                    general = {
+                        col = {
+                            active_border = "rgb(FFFFFF)",
+                            inactive_border = "rgb(FFFFFF)",
+                        }
+                    },
+                    decoration = {
+                        rounding = 0,
+                        dim_inactive = false,
+                        inactive_opacity = 1,
+                    }
+                })
+            "#,
+                )
+                .spawn()?
+                .wait()?;
+            dispatch("hl.dsp.submap(\"empty\")")?;
 
             grab_window()?
         }
@@ -330,7 +349,7 @@ fn screenshot(mode: ScreenshotMode) -> HResult<()> {
 
     if mode == ScreenshotMode::Window {
         hyprland::ctl::reload::call()?;
-        hyprland::dispatch!(Custom, "submap", "reset")?;
+        dispatch("hl.dsp.submap(\"reset\")")?;
     }
 
     if has_result {
@@ -379,7 +398,7 @@ fn new_terminal() -> HResult<()> {
         };
 
         let error = exec::Command::new("ghostty")
-            .arg("--gtk-single-instance=true")
+            .arg("+new-window")
             .arg(format!("--working-directory={}", path.to_string_lossy()))
             .exec();
 

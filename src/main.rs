@@ -30,6 +30,8 @@ enum Command {
     Screenshot { mode: ScreenshotMode },
     /// Creates a new terminal window in the same directory
     NewTerminal,
+    /// Creates a new explorer window in the same directory
+    NewExplorer,
 }
 
 #[derive(PartialEq, Eq, Debug, Clone, Subcommand, ValueEnum)]
@@ -60,6 +62,7 @@ fn main() -> HResult<()> {
         Command::ToggleFullscreen => toggle_fullscreen(),
         Command::Screenshot { mode } => screenshot(mode),
         Command::NewTerminal => new_terminal(),
+        Command::NewExplorer => new_explorer(),
     }
 }
 
@@ -471,8 +474,6 @@ impl JetBrainsProduct {
                                 .map(|(x, _)| x)
                         });
 
-                    println!("{name}, {project_name:?}");
-
                     if project_name == Some(name) {
                         return Some(PathBuf::from(
                             path.replace("$USER_HOME$", &home.to_string_lossy()),
@@ -500,6 +501,16 @@ fn find_window_location(client: Client) -> Option<PathBuf> {
         }
 
         expanduser::expanduser(string).ok()
+    } else if client.initial_class == "blender" {
+        let path = client
+            .title
+            .split_once('[')?
+            .1
+            .rsplit_once("] - Blender")?
+            .0;
+
+        let path = expanduser::expanduser(path).ok()?.parent()?.to_owned();
+        Some(path)
     } else if let Some(class) = client.initial_class.strip_prefix("jetbrains-")
         && client.class == client.initial_class
         && client.initial_title.is_empty()
@@ -521,6 +532,25 @@ fn new_terminal() -> HResult<()> {
         let error = exec::Command::new("ghostty")
             .arg("+new-window")
             .arg(format!("--working-directory={}", path.to_string_lossy()))
+            .exec();
+
+        println!("{error:?}");
+    }
+
+    Ok(())
+}
+
+fn new_explorer() -> HResult<()> {
+    let client = Client::get_active()?;
+
+    let Some(client) = client else {
+        return Ok(());
+    };
+
+    if let Some(path) = find_window_location(client) {
+        let error = exec::Command::new("nautilus")
+            .arg("--new-window")
+            .arg(path)
             .exec();
 
         println!("{error:?}");

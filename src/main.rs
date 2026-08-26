@@ -1,3 +1,6 @@
+mod jetbrains;
+
+use crate::jetbrains::JetBrainsProduct;
 use std::{
     fmt::Display,
     io::Write,
@@ -381,110 +384,6 @@ fn screenshot(mode: ScreenshotMode) -> HResult<()> {
     }
 
     Ok(())
-}
-
-enum JetBrainsProduct {
-    IntelliJIdea,
-    CLion,
-    AppCode,
-    PyCharm,
-    RubyMine,
-    DataGrip,
-    AndroidStudio,
-    WebStorm,
-    PhpStorm,
-    GoLand,
-    Rider,
-    RustRover,
-}
-
-impl JetBrainsProduct {
-    fn code(&self) -> &'static str {
-        match self {
-            Self::IntelliJIdea => "idea",
-            Self::CLion => "clion",
-            Self::AppCode => "appcode",
-            Self::PyCharm => "pycharm",
-            Self::RubyMine => "rubymine",
-            Self::DataGrip => "datagrip",
-            Self::AndroidStudio => "studio",
-            Self::WebStorm => "webide",
-            Self::PhpStorm => "phpstorm",
-            Self::GoLand => "goland",
-            Self::Rider => "rider",
-            Self::RustRover => "rustrover",
-        }
-    }
-
-    fn vendor(&self) -> &'static str {
-        match self {
-            Self::AndroidStudio => "Google",
-            _ => "JetBrains",
-        }
-    }
-
-    fn parse(value: &str) -> Option<Self> {
-        match value {
-            "idea" => Some(Self::IntelliJIdea),
-            "studio" => Some(Self::AndroidStudio),
-            _ => None,
-        }
-    }
-
-    fn find_location(&self, title: &str) -> Option<PathBuf> {
-        if let Some((name, _)) = title.split_once(" – ") {
-            let home = PathBuf::from(std::env::var("HOME").ok()?);
-
-            let path = std::env::var(format!("{}_PROPERTIES", self.code().to_uppercase()))
-                .ok()
-                .and_then(|x| PathBuf::from(x).parent().map(Path::to_owned))
-                .or_else(|| {
-                    let path = home.join(".config").join(self.vendor());
-
-                    std::fs::read_dir(path)
-                        .ok()?
-                        .flatten()
-                        .flat_map(|x| Some((x.metadata().ok()?.modified().ok()?, x)))
-                        .max_by_key(|(x, _)| *x)
-                        .map(|x| x.1.path())
-                })?;
-
-            let path = path.join("options").join("recentProjects.xml");
-            let text = std::fs::read_to_string(path).ok()?;
-            let document = roxmltree::Document::parse(&text).ok()?;
-            for child in document
-                .root_element()
-                .first_element_child()?
-                .first_element_child()?
-                .first_element_child()?
-                .children()
-            {
-                if let Some(path) = child.attribute("key") {
-                    let frame_title = child
-                        .first_element_child()?
-                        .first_element_child()?
-                        .attribute("frameTitle")?;
-
-                    let project_name =
-                        frame_title.split_once(" – ").map(|(x, _)| x).or_else(|| {
-                            frame_title
-                                .strip_suffix(']')
-                                .and_then(|x| x.rsplit_once('['))
-                                .and_then(|(_, x)| x.split_once('.'))
-                                .map(|(x, _)| x)
-                        });
-
-                    if project_name == Some(name) {
-                        return Some(PathBuf::from(
-                            path.replace("$USER_HOME$", &home.to_string_lossy()),
-                        ));
-                    }
-                }
-            }
-        }
-
-        None
-    }
 }
 
 fn find_window_location(client: Client) -> Option<PathBuf> {
